@@ -6,7 +6,7 @@ Simplify deployment of Spring Boot Tasks to AWS Fargate
 Overview
 =
 
-A bash shell script to easily deploy Spring Boot-based tasks to AWS Fargate cluster
+A Bash shell script and accompanying files to easily deploy Spring Boot-based tasks to AWS Fargate cluster
 
 Specifically, it does the following:
 
@@ -15,7 +15,7 @@ Specifically, it does the following:
 3) Pushes the local Docker image an AWS ECR repository
 4) Uses a CloudFormation template to deploy ECR image as a Fargate task to the selected *deployment environment*
 
-An *deployment environment* is defined by a **.properties** file in the scripts directory, which references pre-defined 
+A *deployment environment* is defined by a **.properties** file in the scripts directory, which references pre-defined 
 name-value pairs describing the characteristics of the environment.  The values are references to [AWS System Manager 
 Parameter Store](https://aws.amazon.com/systems-manager/features/#Parameter_Store) entries:
 
@@ -46,9 +46,9 @@ fargate-deploy --task-name <task-name> --development-environment <environment-na
 
 Where:
  
-*<task-name>* = the name the task will be deployed under (e.g. *'MyImportantTask*)
+*\<task-name>* = the name the task will be deployed under (e.g. *'MyImportantTask*)
 
-*<development-environment>* = the pre-defined environment the task will be deployed to (e.g. *'alpha'*)  
+*\<development-environment>* = the pre-defined environment the task will be deployed to (e.g. *'alpha'*)  
 
 For a full description of all available options:
 
@@ -82,10 +82,10 @@ Install
 General:
 
 1) Clone this repo to your local machine
-1) Create a `~/bin` directory
-2) Add `~/bin` to your PATH
-3) Copy all the files from the repo's `/bin` directory to `~/bin`
-4) Mark `fargate-deploy` as executable
+1) Create a `$HOME/bin` directory
+2) Add `$HOME/bin` to your PATH
+3) Copy all the files from the repo's `/bin` directory to `$HOME/bin`
+4) Mark the `fargate-deploy` file as executable
 
 For Linux specifically:
 ```sh
