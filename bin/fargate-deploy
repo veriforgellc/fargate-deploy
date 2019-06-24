@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+
+usage() {
+  bold=$(tput bold)
+  normal=$(tput sgr0)
+  echo ""
+  echo "${bold}NAME${normal}"
+  echo -e "\t$(basename $0)"
+  echo ""
+  echo "${bold}DESCRIPTION${normal}"
+  echo -e "\tDeploys a Java jar as a AWS Fargate service."
+  echo ""
+  echo -e "\tThis is accomplished as follows:"
+  echo -e "\t1) Check uncommitted Git changes, and ask for confirmation before proceeding"
+  echo -e "\t2) Build local Docker image and tag with the current Git revision"
+  echo -e "\t3) Push local Docker image to AWS ECR repository"
+  echo -e "\t4) Use CloudFormation template to deploy ECR image to Fargate"
+  echo ""
+  echo "${bold}SYNOPSIS${normal}"
+  echo -e "\t  $(basename $0)"
+  echo -e "\t--task-name <value>"
+  echo -e "\t--deployment-environment <value>"
+  echo -e "\t[--aws-profile <value>]"
+  echo -e "\t[--image-name <value>]"
+  echo -e "\t[--image-tag <value>]"
+  echo -e "\t[--parameter-overrides <value> [<value>...]]"
+  echo ""
+  echo "${bold}OPTIONS${normal}"
+  echo -e "\t${bold}--task-name${normal} (string) The name of the task to deploy (e.g. compliance)"
+  echo ""
+  echo -e "\t${bold}--deployment-environment${normal} (string) The name of a pre-defined environment to deploy to"
+  echo -e "\t  (e.g. dev, alpha, beta, prod)"
+  echo ""
+  echo -e "\t${bold}--aws-profile${normal} (string) The (optional) name of the AWS credentials profile to use (defaults to 'default')"
+  echo ""
+  echo -e "\t${bold}--image-name${normal} (string) The (optional) name of the Docker image to deploy (defaults to task-name)"
+  echo ""
+  echo -e "\t${bold}--image-tag${normal} (string) The (optional) tag of the Docker image to deploy (defaults to current Git revision)"
+  echo ""
+  echo -e "\t${bold}--parameter-overrides${normal} (list) An (optionals) list of parameter structures which will override default"
+  echo -e "\t  template values.  Syntax: ParameterKey1=ParameterValue1 ParameterKey2=ParameterValue2 ..."
+  echo ""
+  echo "${bold}KNOWN BUGS${normal}"
+  echo -e "\t  ${bold}'--parameter-overrides${normal}' option must be specified ${bold}LAST${normal}, or results are unpredictable!"
+  echo ""
+  echo "${bold}EXAMPLES${normal}"
+  echo -e "\t  $(basename $0) --task-name compliance --deployment-environment alpha"
+  echo ""
+  echo -e "\t  $(basename $0) --task-name invoice --deployment-environment beta --aws-profile production --parameter-overrides Cpu=1024 Memory=2048"
+  echo ""
+  exit 1
+}
+
+git_check() {
+  if [[ -n $(git status --porcelain) ]]; then
+    read -p "Found uncommitted Git changes -- Are you sure you want to proceed [y/N]? " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]] ; then
+      echo "Exiting -- No changes made."
+      exit 1
+    fi
+  fi
+}
+
+# Get script info
+ScriptDirectory=$(dirname $0)
+ScriptName=$(basename $0 )
+
+# Parse parameters
+TaskName=
+DeploymentEnvironment=
+AwsProfile=
+ImageName=
+ImageTag=
+ParameterOverrides=
+
+Params=""
+
+while (( "$#" )); do
+  case "$1" in
+    --task-name)
+      TaskName=$2
+      shift 2
+      ;;
+    --deployment-environment)
+      DeploymentEnvironment=$2
+      shift 2
+      ;;
+    --aws-profile)
+      AwsProfile=$2
+      shift 2
+      ;;
+    --parameter-overrides)
+      shift
+      ParameterOverrides=$@
+      ;;
+    --help)
+      usage
+      ;;
+    -*|--*=)
+      echo "Error: Unsupported flag $1" >&2
+      usage
+      ;;
+    *)
+      Params="${Params} $1"
+      shift
+      ;;
+  esac
+done
+
+eval set -- "${Params}"
+
+if [[ -z "${TaskName}" ]] ;  then
+    echo "Error: Missing required parameter 'task-name'"
+    usage
+fi
+
+if [[ -z "${DeploymentEnvironment}" ]] ;  then
+    echo "Error: Missing required parameter 'deployment-environment'"
+    usage
+fi
+
+AwsProfile=${AwsProfile:-default}
+ImageName=${ImageName:-${TaskName}}
+
+if [[ -z "${ImageTag}" ]] ;  then
+  git_check
+  ImageTag=$(git log -n 1 --pretty=format:"%H")
+fi
+
+AwsAccountId=$(aws --profile ${AwsProfile} sts get-caller-identity --output text --query 'Account')
+AwsRegion=$(aws --profile ${AwsProfile} configure get region)
+
+LocalImageName=${ImageName}
+LocalImageTag=${ImageTag}
+docker build --tag ${LocalImageName}:${LocalImageTag} .
+docker tag ${LocalImageName}:${LocalImageTag} ${LocalImageName}:latest
+
+# Ensure local Docker image exists before proceeding
+docker image inspect ${LocalImageName}:${LocalImageTag} > /dev/null
+if [[ $? -ne 0 ]]; then
+    echo "ERROR: ${LocalImageName}:${LocalImageTag} not found in local registry -- aborting!"
+    exit 1
+fi
+
+# Push image to AWS ECR repository
+EcrRepository=${AwsAccountId}.dkr.ecr.${AwsRegion}.amazonaws.com
+EcrImageName=${EcrRepository}/${ImageName}
+EcrImageTag=${ImageTag}
+
+echo "Pushing to ${EcrImageName} to ECR"
+#docker tag ${LocalImageName}:${LocalImageTag} ${EcrImageName}:${EcrImageTag}
+#docker push ${EcrImageName}:${EcrImageTag}
+
+# Deploy service
+TemplateFile=${ScriptDirectory}/${ScriptName}-cf.yaml
+DeploymentEnvironmentProperties=$(cat ${ScriptDirectory}/${ScriptName}-${DeploymentEnvironment}.properties)
+
+echo aws cloudformation deploy \
+  --stack-name ${TaskName}-${DeploymentEnvironment}-stack \
+  --template-file ${TemplateFile} \
+  --parameter-overrides ${DeploymentEnvironmentProperties} \
+  EnvironmentName=${DeploymentEnvironment} \
+  TaskName=${TaskName} \
+  EcrImageName=${EcrImageName} \
+  EcrImageTag=${EcrImageTag} \
+  ${ParameterOverrides}

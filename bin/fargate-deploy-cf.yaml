@@ -1,0 +1,154 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+#
+#  Deploy ECR image to Fargate cluster
+#
+#  Features:
+#    1) Creates log group named /ecs/${environment}/${task_name}
+#    2) Creates/updates ECS Task Fefinition with new ECR image
+#    3) Creates CloudMap DNS discovery service named ${task_name}-service.${namespace} (e.g. compliance-service.dev-local)
+#    4) Creates/updates ECS Service definition and links it to new task definition
+#
+#  Note: All environment-specific parameters (e.g. subnets/security-groups, etc.) are sourced from SSM Parameter Store
+
+Parameters:
+  EnvironmentName:
+    Description: 'Deployment environment name (e.g. dev, alpha, beta, prod, etc.)'
+    Type: String
+  TaskName:
+    Description: 'Task name'
+    Type: String
+  EcrImageName:
+    Description: 'ECR Image Name'
+    Type: String
+  EcrImageTag:
+    Description: 'ECR Image Tag (Preferably the value of a Git Commit Id)'
+    Type: String
+  Cpu:
+    Description: 'Fargate CPU allocation'
+    Type: String
+    Default: 256
+  Memory:
+    Description: 'Fargate Memory allocation'
+    Type: String
+    Default: 512
+  EcsClusterName:
+    Description: 'ECS Cluster to execute on'
+    Type: AWS::SSM::Parameter::Value<String>
+  EcsExecutionRole:
+    Description: 'IAM Role for ECS executions'
+    Type: AWS::SSM::Parameter::Value<String>
+  EcsTaskRole:
+    Description: 'IAM Role for ECS tasks'
+    Type: AWS::SSM::Parameter::Value<String>
+  VpcSecurityGroups:
+    Description: 'VPC Security Groups to run task in'
+    Type: AWS::SSM::Parameter::Value<List<String>>
+  VpcSubnets:
+    Description: 'VPC Subnets to run task in'
+    Type: AWS::SSM::Parameter::Value<List<String>>
+  ServiceDiscoveryNamespaceId:
+    Description: 'CloudMap service discovery Namespace Id'
+    Type: AWS::SSM::Parameter::Value<String>
+  SpringCloudConfigUri:
+    Description: 'URI to Spring Cloud Config Server'
+    Type: AWS::SSM::Parameter::Value<String>
+  SpringProfilesActive:
+    Description: 'Active Spring Profiles'
+    Type: AWS::SSM::Parameter::Value<String>
+
+
+Resources:
+
+  # Define unique CloudWatch Log Group under the /ecs namespace
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}/${TaskName}'
+      RetentionInDays: 14
+
+  # Define ECS Task Definition referencing the desired Docker image in ECR
+  TaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Ref TaskName
+      TaskRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${EcsTaskRole}'
+      ExecutionRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${EcsExecutionRole}'
+      NetworkMode: 'awsvpc'
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu:  !Ref Cpu
+      Memory: !Ref Memory
+      Tags:
+        - Key: 'githash'
+          Value: !Ref EcrImageTag
+      ContainerDefinitions:
+        - LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Sub '${AWS::Region}'
+              awslogs-stream-prefix: 'ecs'
+          PortMappings:
+            - Protocol: 'tcp'
+              ContainerPort: '8080'
+          Environment:
+            - Name: 'SPRING_CLOUD_CONFIG_URI'
+              Value: !Ref SpringCloudConfigUri
+            - Name: 'SPRING_PROFILES_ACTIVE'
+              Value: !Ref SpringProfilesActive
+          Image: !Sub '${EcrImageName}:${EcrImageTag}'
+          HealthCheck:
+            Retries: 3
+            Command:
+              - 'CMD-SHELL'
+              - 'curl -f http://localhost:8080/actuator/health || exit 1'
+            Timeout: 10
+            Interval: 60
+            StartPeriod: 60
+          Essential: true
+          Name: !Ref TaskName
+
+  # Define CloudMap entry for DNS-based service discovery
+  ServiceDiscovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      DnsConfig:
+        NamespaceId: !Ref ServiceDiscoveryNamespaceId
+        DnsRecords:
+          - TTL: 60
+            Type: A
+        RoutingPolicy: MULTIVALUE
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Name: !Sub '${TaskName}-service'
+
+  # Define ECS Service referencing the ECS Task Definition created earlier
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref EcsClusterName
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: !Ref VpcSecurityGroups
+          Subnets: !Ref VpcSubnets
+      PlatformVersion: LATEST
+      PropagateTags: TASK_DEFINITION
+      ServiceName: !Sub '${TaskName}-service'
+      ServiceRegistries:
+        - ContainerName: !Ref TaskName
+          RegistryArn: !Sub "arn:aws:servicediscovery:${AWS::Region}:${AWS::AccountId}:service/${ServiceDiscovery}"
+      TaskDefinition: !Ref TaskDefinition
+
+
+Outputs:
+  TaskDefinitionArn:
+    Description: 'Task Definition Arn'
+    Value: !Ref TaskDefinition
