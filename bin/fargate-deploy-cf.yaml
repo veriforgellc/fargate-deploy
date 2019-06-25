@@ -5,7 +5,7 @@ AWSTemplateFormatVersion: 2010-09-09
 #
 #  Features:
 #    1) Creates log group named /ecs/${environment}/${task_name}
-#    2) Creates/updates ECS Task Fefinition with new ECR image
+#    2) Creates/updates ECS Task Definition with new ECR image
 #    3) Creates CloudMap DNS discovery service named ${task_name}-service.${namespace} (e.g. compliance-service.dev-local)
 #    4) Creates/updates ECS Service definition and links it to new task definition
 #

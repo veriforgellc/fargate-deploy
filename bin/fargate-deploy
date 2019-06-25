@@ -149,14 +149,14 @@ EcrImageName=${EcrRepository}/${ImageName}
 EcrImageTag=${ImageTag}
 
 echo "Pushing to ${EcrImageName} to ECR"
-#docker tag ${LocalImageName}:${LocalImageTag} ${EcrImageName}:${EcrImageTag}
-#docker push ${EcrImageName}:${EcrImageTag}
+docker tag ${LocalImageName}:${LocalImageTag} ${EcrImageName}:${EcrImageTag}
+docker push ${EcrImageName}:${EcrImageTag}
 
 # Deploy service
 TemplateFile=${ScriptDirectory}/${ScriptName}-cf.yaml
 DeploymentEnvironmentProperties=$(cat ${ScriptDirectory}/${ScriptName}-${DeploymentEnvironment}.properties)
 
-echo aws cloudformation deploy \
+aws cloudformation deploy \
   --stack-name ${TaskName}-${DeploymentEnvironment}-stack \
   --template-file ${TemplateFile} \
   --parameter-overrides ${DeploymentEnvironmentProperties} \
