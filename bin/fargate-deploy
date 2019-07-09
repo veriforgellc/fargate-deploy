@@ -2,19 +2,21 @@
 
 usage() {
   local bold=$(tput bold)
+  local italic=$(tput sitm)
   local normal=$(tput sgr0)
   echo ""
   echo "${bold}NAME${normal}"
   echo -e "\t$(basename $0)"
   echo ""
   echo "${bold}DESCRIPTION${normal}"
-  echo -e "\tDeploys a Java jar as an AWS Fargate service."
+  echo -e "\tDeploys a Java application as an AWS Fargate service."
   echo ""
   echo -e "\tThis is accomplished as follows:"
-  echo -e "\t1) Check uncommitted Git changes, and ask for confirmation before proceeding"
-  echo -e "\t2) Build local Docker image and tag with the current Git revision"
-  echo -e "\t3) Push local Docker image to AWS ECR repository"
-  echo -e "\t4) Use CloudFormation template to deploy ECR image to Fargate"
+  echo -e "\t1) Check for uncommitted Git changes, and ask for confirmation before proceeding"
+  echo -e "\t2) Build Java app via '${italic}mvn clean package -DskipTests${normal}'"
+  echo -e "\t3) Bundle the app into a local Docker image, tagging it with the current Git revision"
+  echo -e "\t4) Push the local Docker image to AWS ECR repository"
+  echo -e "\t5) Use a CloudFormation template to deploy ECR image to Fargate"
   echo ""
   echo "${bold}SYNOPSIS${normal}"
   echo -e "\t  $(basename $0)"
@@ -79,7 +81,6 @@ docker_logout() {
     docker logout ${EcrRepository}
   fi
 }
-
 
 # Get script info
 ScriptDirectory=$(dirname $0)
@@ -155,6 +156,14 @@ fi
 AwsAccountId=$(aws --profile ${AwsProfile} sts get-caller-identity --output text --query 'Account')
 AwsRegion=$(aws --profile ${AwsProfile} configure get region)
 
+# Run maven build
+mvn clean package -DskipTests
+if [[ $? -ne 0 ]]; then
+    echo "ERROR: Maven build had errors -- aborting!"
+    exit 1
+fi
+
+# Build local Docker image
 LocalImageName=${ImageName}
 LocalImageTag=${ImageTag}
 docker build --tag ${LocalImageName}:${LocalImageTag} .

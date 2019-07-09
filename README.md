@@ -11,9 +11,10 @@ A Bash shell script and accompanying files to easily deploy Spring Boot-based ta
 Specifically, it does the following:
 
 1) Checks for uncommitted Git changes, and asks for confirmation before proceeding
-2) Builds a local Docker image, and by default, tags it with the current Git revision
-3) Pushes the local Docker image an AWS ECR repository
-4) Uses a CloudFormation template to deploy ECR image as a Fargate task to the selected *deployment environment*
+2) Builds the app using *'mvn clean package -DskipTests'*
+3) Bundles the app into a local Docker image, and by default, tags it with the current Git revision
+4) Pushes the local Docker image an AWS ECR repository
+5) Uses a CloudFormation template to deploy ECR image as a Fargate task to the selected *deployment environment*
 
 A *deployment environment* is defined by a **.properties** file in the scripts directory, which references pre-defined 
 name-value pairs describing the characteristics of the environment.  The values are references to [AWS System Manager 
@@ -40,8 +41,7 @@ Usage Summary
 Assuming you're in the root directory of the Spring Boot project you wish to deploy, just do:
 
 ```sh
-mvn clean package
-fargate-deploy --task-name <task-name> --development-environment <environment-name>
+fargate-deploy --task-name <task-name> --development-environment <environment-name> --run-docker-login
 ```
 
 Where:
